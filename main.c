@@ -7,9 +7,13 @@ typedef enum {
     FLEX_LEFT_TO_RIGHT,
 } FlexDirection;
 
+typedef struct { int x, y, w, h; } Rect;
+typedef struct { int l, t, r, b; } Bound;
+
 typedef struct {
-    uint32_t child_gap;
     FlexDirection flex_direction;
+    Bound padding;
+    Bound margin;
     Color color;
     struct {
         void *font;
@@ -19,16 +23,11 @@ typedef struct {
 
 typedef struct Box Box;
 typedef struct {
-    uint32_t x;
-    uint32_t y;
-    uint32_t width;
-    uint32_t height;
-    uint32_t min_width;
-    uint32_t min_height;
-    uint32_t max_width;
-    uint32_t max_height;
-    uint32_t x_ptr;
-    uint32_t y_ptr;
+    bool fixed_sized;
+    Rect inner;
+    Rect outer;
+    uint32_t cursor_x;
+    uint32_t cursor_y;
 } BoxLayout;
 
 struct Box {
@@ -49,7 +48,8 @@ struct Box {
 
 typedef int  (*MeasureTextPfn)(void *font, const char *text, int font_size);
 typedef void (*DrawTextPfn)(void *font, const char *text, int font_size, int x, int y, Color tint);
-typedef void (*DrawRectPfn)(int x, int y, int width, int height, Color color);
+typedef void (*DrawRectPfn)(Rect rect, Color color, float roundness);
+typedef void (*DrawRectOutlinePfn)(Rect rect, Color color, int border_width);
 
 #define BOXES_CAP 1024
 typedef struct Ctx {
@@ -63,25 +63,26 @@ typedef struct Ctx {
         MeasureTextPfn measure_text;
         DrawTextPfn draw_text;
         DrawRectPfn draw_rect;
+        DrawRectOutlinePfn draw_rect_outline;
     } config;
 } Ctx;
 
-int measure_text(Ctx *ctx, void *font, const char *text, int font_size)
+static int measure_text(Ctx *ctx, void *font, const char *text, int font_size)
 {
     if(ctx->config.measure_text) return ctx->config.measure_text(font, text, font_size);
     return 0;
 }
 
-void draw_text(Ctx *ctx, void *font, const char *text, int font_size, int x, int y, Color tint)
+static void draw_text(Ctx *ctx, void *font, const char *text, int font_size, int x, int y, Color tint)
 {
     if(ctx->config.draw_text)
         ctx->config.draw_text(font, text, font_size, x, y, tint);
 }
 
-void draw_rect(Ctx *ctx, int x, int y, int width, int height, Color color)
+static void draw_rect(Ctx *ctx, Rect rect, Color color, float roundness)
 {
     if(ctx->config.draw_rect)
-        ctx->config.draw_rect(x, y, width, height, color);
+        ctx->config.draw_rect(rect, color, roundness);
 }
 
 static inline void _add_box_child(Box *parent, Box *child)
@@ -112,8 +113,8 @@ void begin_frame(Ctx *ctx, uint32_t root_width, uint32_t root_height)
     ctx->count_boxes = 0;
     Box *root = &ctx->root;
     _reset_box(root);
-    root->layout.width  = root_width;
-    root->layout.height = root_height;
+    root->layout.inner = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.outer = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
     root->id = 0;
     ctx->curr = root;
 }
@@ -150,13 +151,19 @@ void text_box(Ctx *ctx, const char *text, BoxConfig config)
 static void dumb_box(Box *box, const char *label)
 {
     if(box->text) {
-        printf("%s: %*s [%d] \"%s\" w=%d h=%d x=%d y=%d\n", 
-                label, box->level*4, "",
-                box->id, box->text, box->layout.width, box->layout.height, box->layout.x, box->layout.y);
+        printf("%s: %*s [%d] \"%s\" outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] ptr[x=%d y=%d]\n", 
+                label, box->level*4, "", box->id, box->text, 
+                box->layout.outer.x, box->layout.outer.y, box->layout.outer.w, box->layout.outer.h,
+                box->layout.inner.x, box->layout.inner.y, box->layout.inner.w, box->layout.inner.h,
+                box->layout.cursor_x, box->layout.cursor_y
+                );
     } else {
-        printf("%s: %*s [%d] w=%d h=%d x=%d y=%d\n", 
-                label, box->level*4, "",
-                box->id, box->layout.width, box->layout.height, box->layout.x, box->layout.y);
+        printf("%s: %*s [%d] outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] ptr[x=%d y=%d]\n", 
+                label, box->level*4, "", box->id,
+                box->layout.outer.x, box->layout.outer.y, box->layout.outer.w, box->layout.outer.h,
+                box->layout.inner.x, box->layout.inner.y, box->layout.inner.w, box->layout.inner.h,
+                box->layout.cursor_x, box->layout.cursor_y
+                );
     }
 }
 
@@ -165,63 +172,85 @@ static void dumb_box(Box *box, const char *label)
 
 static void _compute_size(Ctx *ctx, Box *parent, Box *box)
 {
+    (void)parent;
+
     if(box->text) { // text box is a special box
         int height = box->config.text.font_size;
         int width  = measure_text(ctx, box->config.text.font, box->text, height);
-        box->layout.width  = width;
-        box->layout.height = height;
+        box->layout.inner.w = width;
+        box->layout.inner.h = height;
+        box->layout.outer.w = width;
+        box->layout.outer.h = height;
+        box->layout.fixed_sized = true;
     } else {
         Box *child = box->children.begin;
         if(!child) return;
         _compute_size(ctx, box, child);
-        int min_width  = child->layout.width;
-        int min_height = child->layout.height;
-        int max_width  = min_width;
-        int max_height = min_height;
-        int box_width  = min_width;
-        int box_height = min_height;
+        int box_width  = child->layout.outer.w + child->config.margin.l + child->config.margin.r;
+        int box_height = child->layout.outer.h + child->config.margin.t + child->config.margin.b;
         child = child->next;
         for(; child != NULL; child = child->next) {
             _compute_size(ctx, box, child);
-            int width  = child->layout.width;
-            int height = child->layout.height;
-            min_width  = MY_MIN(width, min_width);
-            min_height = MY_MIN(height, min_height);
-            max_width  = MY_MAX(width, max_width);
-            max_height = MY_MAX(height, max_height);
-            box_width  += width;
-            box_height += height;
+            int width  = child->layout.outer.w;
+            int height = child->layout.outer.h;
+            if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) 
+                box_width  += width  + child->config.margin.l + child->config.margin.r;
+            else 
+                box_height += height + child->config.margin.t + child->config.margin.b;
         }
-        box->layout.min_width  = min_width;
-        box->layout.min_height = min_height;
-        box->layout.max_width  = max_width; 
-        box->layout.max_height = max_height;
-        box->layout.width  = box_width;
-        box->layout.height = box_height;
+        box->layout.inner.w = box_width;
+        box->layout.inner.h = box_height;
+        box->layout.outer.w = box_width  + box->config.padding.l + box->config.padding.r;
+        box->layout.outer.h = box_height + box->config.padding.t + box->config.padding.b;
     }
-}
-
-static inline void _incr_ptr(Box *box, bool x, uint32_t value)
-{
-    if(x) box->layout.x_ptr += value;
-    else  box->layout.y_ptr += value;
 }
 
 static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
 {
-    box->layout.x = parent->layout.x_ptr;
-    box->layout.y = parent->layout.y_ptr;
-    parent->layout.x_ptr += box->layout.width;
-    parent->layout.y_ptr += box->layout.height;
-    for(Box *child = box->children.begin; child != NULL; child = child->next)
-        _compute_pos(ctx, box, child);
+    if(parent->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+        box->layout.cursor_x = parent->layout.cursor_x;
+        box->layout.cursor_y = parent->layout.inner.y;
+    } else {
+        box->layout.cursor_x = parent->layout.inner.x;
+        box->layout.cursor_y = parent->layout.cursor_y;
+    }
+    // apply top-left margin
+    box->layout.cursor_x += box->config.margin.l;
+    box->layout.cursor_y += box->config.margin.t;
+    box->layout.outer.x = box->layout.cursor_x;
+    box->layout.outer.y = box->layout.cursor_y;
+    // apply top-left padding
+    box->layout.cursor_x += box->config.padding.l;
+    box->layout.cursor_y += box->config.padding.t;
+    box->layout.inner.x = box->layout.cursor_x;
+    box->layout.inner.y = box->layout.cursor_y;
+
+    if(box->layout.fixed_sized) {
+        box->layout.cursor_x += box->layout.inner.w;
+        box->layout.cursor_y += box->layout.inner.h;
+    } else {
+        for(Box *child = box->children.begin; child != NULL; child = child->next) {
+            _compute_pos(ctx, box, child);
+        }
+    }
+    // apply right-bottom padding
+    box->layout.cursor_x += box->config.padding.r;
+    box->layout.cursor_y += box->config.padding.b;
+    // apply right-bottom margin
+    box->layout.cursor_x += box->config.margin.r;
+    box->layout.cursor_y += box->config.margin.b;
+
+    parent->layout.cursor_x = box->layout.cursor_x;
+    parent->layout.cursor_y = box->layout.cursor_y;
 }
 
 static void _render(Ctx *ctx, Box *parent, Box *box)
 {
+    (void)parent;
     if(box->text) {
+        draw_rect(ctx, box->layout.outer, RED, 0);
         draw_text(ctx, box->config.text.font, box->text, box->config.text.font_size, 
-                box->layout.x, box->layout.y, box->config.color);
+                box->layout.inner.x, box->layout.inner.y, box->config.color);
     } else {
         for(Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
@@ -230,7 +259,6 @@ static void _render(Ctx *ctx, Box *parent, Box *box)
 
 void end_frame(Ctx *ctx)
 {
-    // layout pass-es
     for(Box *child = ctx->root.children.begin; child != NULL; child = child->next)
         _compute_size(ctx, &ctx->root, child);
     for(Box *child = ctx->root.children.begin; child != NULL; child = child->next)
@@ -254,9 +282,48 @@ void raylib_draw_text(void *font_ptr, const char *text, int font_size, int x, in
     DrawTextEx(font, text, (Vector2){ x, y }, font_size, 1, WHITE);
 }
 
-void raylib_draw_rect(int x, int y, int width, int height, Color color)
+void raylib_draw_rect(Rect r, Color color, float roundness)
 {
-    DrawRectangle(x, y, width, height, color);
+    DrawRectangleRounded((Rectangle){r.x,r.y,r.w,r.h}, roundness, 20, color);
+}
+
+void raylib_draw_rect_outline(int x, int y, int width, int height, Color color, int border_width)
+{
+    DrawRectangleLinesEx((Rectangle){ .x=x, .y=y, .width=width, .height=height}, border_width, color);
+}
+
+typedef struct {
+    char *items;
+    uint32_t size;
+    uint32_t allocated;
+} TempAtor;
+
+char *temp_sprintf(TempAtor *ator, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap,fmt);
+    va_list copy_ap;
+    va_copy(copy_ap, ap);
+    int needed = vsnprintf(NULL, 0, fmt, copy_ap);
+    va_end(copy_ap);
+
+    if (needed <= 0) {
+        va_end(ap);
+        return NULL;
+    }
+    int required = ator->allocated + needed + 1;
+    if(required > ator->size) {
+        va_end(ap);
+        return NULL;
+    }
+
+    char *dst = &ator->items[ator->allocated];
+
+    vsnprintf(dst, needed + 1, fmt, ap);
+    ator->allocated += (uint32_t)needed + 1;
+    va_end(ap);
+
+    return dst;
 }
 
 int main(void)
@@ -273,23 +340,32 @@ int main(void)
     Font font = GetFontDefault();
 
     BoxConfig default_config = {0};
-    default_config.flex_direction  = FLEX_TOP_TO_BOTTOM;
-    default_config.child_gap = 10;
+    default_config.flex_direction = FLEX_TOP_TO_BOTTOM;
+    default_config.margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
     BoxConfig text_config = {0};
-    text_config.text.font_size = 16;
+    text_config.text.font_size = 24;
     text_config.text.font = &font;
+
+    TempAtor ator = {0};
+    char buf[1024];
+    ator.items = buf;
+    ator.size  = sizeof(buf);
 
     while(!WindowShouldClose()) {
         BeginDrawing();
         begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
+        default_config.flex_direction = FLEX_LEFT_TO_RIGHT;
         open_box(ctx, default_config);
+        default_config.flex_direction = FLEX_TOP_TO_BOTTOM;
             open_box(ctx, default_config);
-                text_box(ctx, "Hello A", text_config);
-                text_box(ctx, "Hello B", text_config);
+                for(int i = 0; i < 10; ++i) {
+                    text_box(ctx, temp_sprintf(&ator, "Hello %d", i), text_config);
+                }
             close_box(ctx);
-            text_box(ctx, "Hello C", text_config);
+            text_box(ctx, "Hello Right Part", text_config);
         close_box(ctx);
         end_frame(ctx);
+        ator.allocated = 0;
 
         EndDrawing();
     }
