@@ -7,6 +7,11 @@ typedef enum {
     FLEX_LEFT_TO_RIGHT,
 } FlexDirection;
 
+typedef enum {
+    BOX_SIZING_FIT_TO_CONTENT = 0,
+    BOX_SIZING_FIXED,
+} BoxSizing;
+
 typedef struct { int x, y, w, h; } Rect;
 typedef struct { int l, t, r, b; } Bound;
 
@@ -23,7 +28,7 @@ typedef struct {
 
 typedef struct Box Box;
 typedef struct {
-    bool fixed_sized;
+    BoxSizing sizing;
     Rect inner;
     Rect outer;
     uint32_t cursor_x;
@@ -85,6 +90,12 @@ static void draw_rect(Ctx *ctx, Rect rect, Color color, float roundness)
         ctx->config.draw_rect(rect, color, roundness);
 }
 
+static void draw_rect_outline(Ctx *ctx, Rect rect, Color color, int thickness)
+{
+    if(ctx->config.draw_rect)
+        ctx->config.draw_rect_outline(rect, color, thickness);
+}
+
 static inline void _add_box_child(Box *parent, Box *child)
 {
     if(parent->children.begin == NULL) {
@@ -108,6 +119,21 @@ static inline void _reset_box(Box *box)
     box->layout = (BoxLayout){0};
 }
 
+#define POINT_IN_RECT(R, X, Y) (((R).x <= (X) && (X) < (R).x + (R).w) && ((R).y <= (Y) && (Y) < (R).y + (R).h))
+
+static Box *_hit_test(Box *box, int x, int y)
+{
+    if(POINT_IN_RECT(box->layout.inner, x, y)) {
+        for(Box *child = box->children.begin; child != NULL; child = child->next) {
+            Box *result = _hit_test(child, x, y);
+            if(result != NULL)
+                return result;
+        }
+        return box;
+    }
+    return NULL;
+}
+
 void begin_frame(Ctx *ctx, uint32_t root_width, uint32_t root_height)
 {
     ctx->count_boxes = 0;
@@ -119,7 +145,7 @@ void begin_frame(Ctx *ctx, uint32_t root_width, uint32_t root_height)
     ctx->curr = root;
 }
 
-void open_box(Ctx *ctx, BoxConfig config)
+Box *open_box(Ctx *ctx, BoxConfig config)
 {
     assert(ctx->count_boxes + 1 <= BOXES_CAP);
     ctx->level += 1;
@@ -132,6 +158,7 @@ void open_box(Ctx *ctx, BoxConfig config)
     curr->config = config;
     _add_box_child(prev, curr);
     ctx->curr = curr;
+    return curr;
 }
 
 void close_box(Ctx *ctx)
@@ -181,22 +208,25 @@ static void _compute_size(Ctx *ctx, Box *parent, Box *box)
         box->layout.inner.h = height;
         box->layout.outer.w = width;
         box->layout.outer.h = height;
-        box->layout.fixed_sized = true;
+        box->layout.sizing  = BOX_SIZING_FIXED;
     } else {
         Box *child = box->children.begin;
-        if(!child) return;
-        _compute_size(ctx, box, child);
-        int box_width  = child->layout.outer.w + child->config.margin.l + child->config.margin.r;
-        int box_height = child->layout.outer.h + child->config.margin.t + child->config.margin.b;
-        child = child->next;
-        for(; child != NULL; child = child->next) {
+        int box_width  = 0;
+        int box_height = 0;
+        if(child) {
             _compute_size(ctx, box, child);
-            int width  = child->layout.outer.w;
-            int height = child->layout.outer.h;
-            if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) 
-                box_width  += width  + child->config.margin.l + child->config.margin.r;
-            else 
-                box_height += height + child->config.margin.t + child->config.margin.b;
+            box_width  += child->layout.outer.w + child->config.margin.l + child->config.margin.r;
+            box_height += child->layout.outer.h + child->config.margin.t + child->config.margin.b;
+            child = child->next;
+            for(; child != NULL; child = child->next) {
+                _compute_size(ctx, box, child);
+                int width  = child->layout.outer.w;
+                int height = child->layout.outer.h;
+                if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) 
+                    box_width  += width  + child->config.margin.l + child->config.margin.r;
+                else 
+                    box_height += height + child->config.margin.t + child->config.margin.b;
+            }
         }
         box->layout.inner.w = box_width;
         box->layout.inner.h = box_height;
@@ -225,7 +255,7 @@ static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
     box->layout.inner.x = box->layout.cursor_x;
     box->layout.inner.y = box->layout.cursor_y;
 
-    if(box->layout.fixed_sized) {
+    if(box->layout.sizing == BOX_SIZING_FIXED) {
         box->layout.cursor_x += box->layout.inner.w;
         box->layout.cursor_y += box->layout.inner.h;
     } else {
@@ -244,16 +274,22 @@ static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
     parent->layout.cursor_y = box->layout.cursor_y;
 }
 
+static int v = 0;
 static void _render(Ctx *ctx, Box *parent, Box *box)
 {
+    if(v < ctx->count_boxes) {
+        dumb_box(box, "_render");
+        v++;
+    }
     (void)parent;
     if(box->text) {
-        draw_rect(ctx, box->layout.outer, RED, 0);
         draw_text(ctx, box->config.text.font, box->text, box->config.text.font_size, 
                 box->layout.inner.x, box->layout.inner.y, box->config.color);
     } else {
+        draw_rect(ctx, box->layout.outer, box->config.color, 0);
         for(Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
+        draw_rect_outline(ctx, box->layout.outer, RED, 2);
     }
 }
 
@@ -287,9 +323,9 @@ void raylib_draw_rect(Rect r, Color color, float roundness)
     DrawRectangleRounded((Rectangle){r.x,r.y,r.w,r.h}, roundness, 20, color);
 }
 
-void raylib_draw_rect_outline(int x, int y, int width, int height, Color color, int border_width)
+void raylib_draw_rect_outline(Rect r, Color color, int border_width)
 {
-    DrawRectangleLinesEx((Rectangle){ .x=x, .y=y, .width=width, .height=height}, border_width, color);
+    DrawRectangleLinesEx((Rectangle){r.x,r.y,r.w,r.h}, border_width, color);
 }
 
 typedef struct {
@@ -333,17 +369,17 @@ int main(void)
     ctx->config.measure_text = raylib_measure_text;
     ctx->config.draw_text    = raylib_draw_text;
     ctx->config.draw_rect    = raylib_draw_rect;
+    ctx->config.draw_rect_outline = raylib_draw_rect_outline;
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    /*SetConfigFlags(FLAG_WINDOW_RESIZABLE);*/
     InitWindow(800, 600, "Simple UI");
 
     Font font = GetFontDefault();
 
-    BoxConfig default_config = {0};
-    default_config.flex_direction = FLEX_TOP_TO_BOTTOM;
-    default_config.margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
+    Bound margin  = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
+    Bound padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
     BoxConfig text_config = {0};
-    text_config.text.font_size = 24;
+    text_config.text.font_size = 20;
     text_config.text.font = &font;
 
     TempAtor ator = {0};
@@ -351,13 +387,27 @@ int main(void)
     ator.items = buf;
     ator.size  = sizeof(buf);
 
+    Color normal = GetColor(0x181818FF);
+    Color hover  = GetColor(0xABABABFF);
+    Color active = GetColor(0xBA1818FF);
+    bool  is_active = false;
+    Color color  = normal;
+
     while(!WindowShouldClose()) {
         BeginDrawing();
         begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
-        default_config.flex_direction = FLEX_LEFT_TO_RIGHT;
-        open_box(ctx, default_config);
-        default_config.flex_direction = FLEX_TOP_TO_BOTTOM;
-            open_box(ctx, default_config);
+        Box *top = open_box(ctx, (BoxConfig){ 
+            .flex_direction = FLEX_LEFT_TO_RIGHT, 
+            .margin = margin, 
+            .color = color, 
+            .padding = padding 
+        });
+            open_box(ctx, (BoxConfig){ 
+                    .flex_direction = FLEX_TOP_TO_BOTTOM, 
+                    .margin = margin, 
+                    .padding = padding, 
+                    .color = normal, 
+            });
                 for(int i = 0; i < 10; ++i) {
                     text_box(ctx, temp_sprintf(&ator, "Hello %d", i), text_config);
                 }
@@ -365,6 +415,17 @@ int main(void)
             text_box(ctx, "Hello Right Part", text_config);
         close_box(ctx);
         end_frame(ctx);
+        Vector2 v = GetMousePosition();
+        Box *box  = _hit_test(top, v.x, v.y);
+        if(box) {
+            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                is_active = !is_active;
+            }
+            color = hover;
+        } else {
+            if(is_active) color = active;
+            else color = normal;
+        }
         ator.allocated = 0;
 
         EndDrawing();
