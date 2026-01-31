@@ -17,6 +17,7 @@ typedef struct { int l, t, r, b; } Bound;
 
 typedef struct {
     FlexDirection flex_direction;
+    BoxSizing sizing;
     Bound padding;
     Bound margin;
     Color color;
@@ -139,8 +140,9 @@ void begin_frame(Ctx *ctx, uint32_t root_width, uint32_t root_height)
     ctx->count_boxes = 0;
     Box *root = &ctx->root;
     _reset_box(root);
-    root->layout.inner = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
-    root->layout.outer = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.inner  = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.outer  = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.sizing = BOX_SIZING_FIXED;
     root->id = 0;
     ctx->curr = root;
 }
@@ -178,14 +180,14 @@ void text_box(Ctx *ctx, const char *text, BoxConfig config)
 static void dumb_box(Box *box, const char *label)
 {
     if(box->text) {
-        printf("%s: %*s [%d] \"%s\" outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] ptr[x=%d y=%d]\n", 
+        printf("%s: %*s [%d] \"%s\" outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
                 label, box->level*4, "", box->id, box->text, 
                 box->layout.outer.x, box->layout.outer.y, box->layout.outer.w, box->layout.outer.h,
                 box->layout.inner.x, box->layout.inner.y, box->layout.inner.w, box->layout.inner.h,
                 box->layout.cursor_x, box->layout.cursor_y
                 );
     } else {
-        printf("%s: %*s [%d] outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] ptr[x=%d y=%d]\n", 
+        printf("%s: %*s [%d] outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
                 label, box->level*4, "", box->id,
                 box->layout.outer.x, box->layout.outer.y, box->layout.outer.w, box->layout.outer.h,
                 box->layout.inner.x, box->layout.inner.y, box->layout.inner.w, box->layout.inner.h,
@@ -210,9 +212,11 @@ static void _compute_size(Ctx *ctx, Box *parent, Box *box)
         box->layout.outer.h = height;
         box->layout.sizing  = BOX_SIZING_FIXED;
     } else {
-        Box *child = box->children.begin;
+        // TODO: It would be cool if we separate x and y sizing
+        box->layout.sizing  = box->config.sizing;
         int box_width  = 0;
         int box_height = 0;
+        Box *child = box->children.begin;
         if(child) {
             _compute_size(ctx, box, child);
             box_width  += child->layout.outer.w + child->config.margin.l + child->config.margin.r;
@@ -222,10 +226,15 @@ static void _compute_size(Ctx *ctx, Box *parent, Box *box)
                 _compute_size(ctx, box, child);
                 int width  = child->layout.outer.w;
                 int height = child->layout.outer.h;
-                if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) 
-                    box_width  += width  + child->config.margin.l + child->config.margin.r;
-                else 
-                    box_height += height + child->config.margin.t + child->config.margin.b;
+                int child_total_w = width  + child->config.margin.l + child->config.margin.r;
+                int child_total_h = height + child->config.margin.t + child->config.margin.b;
+                if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+                    box_width  += child_total_w;
+                    box_height = MY_MAX(box_height, child_total_h);
+                } else {
+                    box_width   = MY_MAX(box_width, child_total_w);
+                    box_height += child_total_h;
+                }
             }
         }
         box->layout.inner.w = box_width;
@@ -379,7 +388,7 @@ int main(void)
     Bound margin  = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
     Bound padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
     BoxConfig text_config = {0};
-    text_config.text.font_size = 20;
+    text_config.text.font_size = 24;
     text_config.text.font = &font;
 
     TempAtor ator = {0};
@@ -408,9 +417,9 @@ int main(void)
                     .padding = padding, 
                     .color = normal, 
             });
-                for(int i = 0; i < 10; ++i) {
-                    text_box(ctx, temp_sprintf(&ator, "Hello %d", i), text_config);
-                }
+                text_box(ctx, "Hello Short", text_config);
+                text_box(ctx, "Hello a long message 1", text_config);
+                text_box(ctx, "Hello a long message 2", text_config);
             close_box(ctx);
             text_box(ctx, "Hello Right Part", text_config);
         close_box(ctx);
@@ -435,3 +444,29 @@ int main(void)
 
     return 0;
 }
+
+/*
+# TODO:
+0. Implement image
+1. Implement different sizing strategy for each axis. For example the width of 
+   a box width would be BOX_SIZING_FIXED  but the height would be BOX_SIZING_FIT_TO_CONTENT.
+   This will require _compute_pos and _compute_size to handle each axis separately
+2. Implement border and shadow for left, right, top and bottom separately
+3. Implement this:
+```
+typedef enum {
+    VALUE_PX = 0,
+    VALUE_PERCENT
+} ValueKind;
+typedef struct {
+    ValueKind kind;
+    float value; // -inf..inf for VALUE_PX but 0..1 for VALUE_PERCENT
+} Value;
+typedef struct {
+    Value width, height;
+} ConfigSize;
+typedef struct {
+    Value l, t, r, b;
+} ConfigBound; // we name this ConfigXXX because we only use these data structures in BoxConfig
+```
+*/
