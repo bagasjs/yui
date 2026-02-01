@@ -15,6 +15,19 @@ typedef enum {
 typedef struct { int x, y, w, h; } Rect;
 typedef struct { int l, t, r, b; } Bound;
 
+typedef enum {
+    VALUE_PIXELS = 0,
+    VALUE_PERCENT,
+} ValueKind;
+
+typedef struct {
+    ValueKind kind;
+    float value;
+} ConfigValue;
+
+typedef struct { ConfigValue width, height; } ConfigSize;
+typedef struct { ConfigValue l,t,r,b; } ConfigBound;
+
 typedef struct {
     FlexDirection flex_direction;
     BoxSizing sizing;
@@ -30,8 +43,9 @@ typedef struct {
 typedef struct Box Box;
 typedef struct {
     BoxSizing sizing;
-    Rect inner;
-    Rect outer;
+    Rect padding_box;
+    Rect margin_box;
+    Rect content_box;
     uint32_t cursor_x;
     uint32_t cursor_y;
 } BoxLayout;
@@ -124,7 +138,7 @@ static inline void _reset_box(Box *box)
 
 static Box *_hit_test(Box *box, int x, int y)
 {
-    if(POINT_IN_RECT(box->layout.inner, x, y)) {
+    if(POINT_IN_RECT(box->layout.padding_box, x, y)) {
         for(Box *child = box->children.begin; child != NULL; child = child->next) {
             Box *result = _hit_test(child, x, y);
             if(result != NULL)
@@ -140,8 +154,9 @@ void begin_frame(Ctx *ctx, uint32_t root_width, uint32_t root_height)
     ctx->count_boxes = 0;
     Box *root = &ctx->root;
     _reset_box(root);
-    root->layout.inner  = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
-    root->layout.outer  = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.content_box = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.padding_box = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->layout.margin_box  = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
     root->layout.sizing = BOX_SIZING_FIXED;
     root->id = 0;
     ctx->curr = root;
@@ -180,17 +195,25 @@ void text_box(Ctx *ctx, const char *text, BoxConfig config)
 static void dumb_box(Box *box, const char *label)
 {
     if(box->text) {
-        printf("%s: %*s [%d] \"%s\" outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
+        printf("%s: %*s [%d] \"%s\" content[x=%d y=%d w=%d h=%d] padding[x=%d y=%d w=%d h=%d] margin[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
                 label, box->level*4, "", box->id, box->text, 
-                box->layout.outer.x, box->layout.outer.y, box->layout.outer.w, box->layout.outer.h,
-                box->layout.inner.x, box->layout.inner.y, box->layout.inner.w, box->layout.inner.h,
+                box->layout.content_box.x, box->layout.content_box.y, 
+                box->layout.content_box.w, box->layout.content_box.h,
+                box->layout.padding_box.x, box->layout.padding_box.y, 
+                box->layout.padding_box.w, box->layout.padding_box.h,
+                box->layout.margin_box.x, box->layout.margin_box.y, 
+                box->layout.margin_box.w, box->layout.margin_box.h,
                 box->layout.cursor_x, box->layout.cursor_y
                 );
     } else {
-        printf("%s: %*s [%d] outer[x=%d y=%d w=%d h=%d] inner[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
+        printf("%s: %*s [%d] content[x=%d y=%d w=%d h=%d] padding[x=%d y=%d w=%d h=%d] margin[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
                 label, box->level*4, "", box->id,
-                box->layout.outer.x, box->layout.outer.y, box->layout.outer.w, box->layout.outer.h,
-                box->layout.inner.x, box->layout.inner.y, box->layout.inner.w, box->layout.inner.h,
+                box->layout.content_box.x, box->layout.content_box.y, 
+                box->layout.content_box.w, box->layout.content_box.h,
+                box->layout.padding_box.x, box->layout.padding_box.y, 
+                box->layout.padding_box.w, box->layout.padding_box.h,
+                box->layout.margin_box.x, box->layout.margin_box.y, 
+                box->layout.margin_box.w, box->layout.margin_box.h,
                 box->layout.cursor_x, box->layout.cursor_y
                 );
     }
@@ -206,67 +229,63 @@ static void _compute_size(Ctx *ctx, Box *parent, Box *box)
     if(box->text) { // text box is a special box
         int height = box->config.text.font_size;
         int width  = measure_text(ctx, box->config.text.font, box->text, height);
-        box->layout.inner.w = width;
-        box->layout.inner.h = height;
-        box->layout.outer.w = width;
-        box->layout.outer.h = height;
+        box->layout.content_box.w = width;
+        box->layout.content_box.h = height;
+        box->layout.padding_box.w = width;
+        box->layout.padding_box.h = height;
+        box->layout.margin_box.w = width;
+        box->layout.margin_box.h = height;
         box->layout.sizing  = BOX_SIZING_FIXED;
-    } else {
-        // TODO: It would be cool if we separate x and y sizing
-        box->layout.sizing  = box->config.sizing;
-        int box_width  = 0;
-        int box_height = 0;
-        Box *child = box->children.begin;
-        if(child) {
-            _compute_size(ctx, box, child);
-            box_width  += child->layout.outer.w + child->config.margin.l + child->config.margin.r;
-            box_height += child->layout.outer.h + child->config.margin.t + child->config.margin.b;
-            child = child->next;
-            for(; child != NULL; child = child->next) {
-                _compute_size(ctx, box, child);
-                int width  = child->layout.outer.w;
-                int height = child->layout.outer.h;
-                int child_total_w = width  + child->config.margin.l + child->config.margin.r;
-                int child_total_h = height + child->config.margin.t + child->config.margin.b;
-                if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
-                    box_width  += child_total_w;
-                    box_height = MY_MAX(box_height, child_total_h);
-                } else {
-                    box_width   = MY_MAX(box_width, child_total_w);
-                    box_height += child_total_h;
-                }
-            }
+        return;
+    } 
+
+    // TODO: It would be cool if we separate x and y sizing
+    box->layout.sizing  = box->config.sizing;
+    int content_width  = 0;
+    int content_height = 0;
+    for(Box *child = box->children.begin; child != NULL; child = child->next) {
+        _compute_size(ctx, box, child);
+        if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+            content_width  += child->layout.margin_box.w;
+            content_height = MY_MAX(content_height, child->layout.margin_box.h);
+        } else {
+            content_width   = MY_MAX(content_width, child->layout.margin_box.w);
+            content_height += child->layout.margin_box.h;
         }
-        box->layout.inner.w = box_width;
-        box->layout.inner.h = box_height;
-        box->layout.outer.w = box_width  + box->config.padding.l + box->config.padding.r;
-        box->layout.outer.h = box_height + box->config.padding.t + box->config.padding.b;
     }
+    box->layout.content_box.w = content_width;
+    box->layout.content_box.h = content_height;
+    box->layout.padding_box.w = content_width  + box->config.padding.l + box->config.padding.r;
+    box->layout.padding_box.h = content_height + box->config.padding.t + box->config.padding.b;
+    box->layout.margin_box.w = box->layout.padding_box.w + box->config.margin.l + box->config.margin.r;
+    box->layout.margin_box.h = box->layout.padding_box.h + box->config.margin.t + box->config.margin.b;
 }
 
 static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
 {
     if(parent->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
         box->layout.cursor_x = parent->layout.cursor_x;
-        box->layout.cursor_y = parent->layout.inner.y;
+        box->layout.cursor_y = parent->layout.content_box.y;
     } else {
-        box->layout.cursor_x = parent->layout.inner.x;
+        box->layout.cursor_x = parent->layout.content_box.x;
         box->layout.cursor_y = parent->layout.cursor_y;
     }
     // apply top-left margin
+    box->layout.margin_box.x = box->layout.cursor_x;
+    box->layout.margin_box.y = box->layout.cursor_y;
     box->layout.cursor_x += box->config.margin.l;
     box->layout.cursor_y += box->config.margin.t;
-    box->layout.outer.x = box->layout.cursor_x;
-    box->layout.outer.y = box->layout.cursor_y;
+    box->layout.padding_box.x = box->layout.cursor_x;
+    box->layout.padding_box.y = box->layout.cursor_y;
     // apply top-left padding
     box->layout.cursor_x += box->config.padding.l;
     box->layout.cursor_y += box->config.padding.t;
-    box->layout.inner.x = box->layout.cursor_x;
-    box->layout.inner.y = box->layout.cursor_y;
+    box->layout.content_box.x = box->layout.cursor_x;
+    box->layout.content_box.y = box->layout.cursor_y;
 
     if(box->layout.sizing == BOX_SIZING_FIXED) {
-        box->layout.cursor_x += box->layout.inner.w;
-        box->layout.cursor_y += box->layout.inner.h;
+        box->layout.cursor_x += box->layout.content_box.w;
+        box->layout.cursor_y += box->layout.content_box.h;
     } else {
         for(Box *child = box->children.begin; child != NULL; child = child->next) {
             _compute_pos(ctx, box, child);
@@ -293,12 +312,12 @@ static void _render(Ctx *ctx, Box *parent, Box *box)
     (void)parent;
     if(box->text) {
         draw_text(ctx, box->config.text.font, box->text, box->config.text.font_size, 
-                box->layout.inner.x, box->layout.inner.y, box->config.color);
+                box->layout.content_box.x, box->layout.content_box.y, box->config.color);
     } else {
-        draw_rect(ctx, box->layout.outer, box->config.color, 0);
+        draw_rect(ctx, box->layout.padding_box, box->config.color, 0);
         for(Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
-        draw_rect_outline(ctx, box->layout.outer, RED, 2);
+        draw_rect_outline(ctx, box->layout.padding_box, RED, 2);
     }
 }
 
@@ -383,7 +402,9 @@ int main(void)
     /*SetConfigFlags(FLAG_WINDOW_RESIZABLE);*/
     InitWindow(800, 600, "Simple UI");
 
-    Font font = GetFontDefault();
+    /*Font font = GetFontDefault();*/
+    Font font = LoadFont("./assets/fonts/JetBrainsMono/ttf/JetBrainsMono-Regular.ttf");
+    SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
 
     Bound margin  = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
     Bound padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
@@ -430,7 +451,7 @@ int main(void)
             if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 is_active = !is_active;
             }
-            color = hover;
+            color = is_active ? active : hover;
         } else {
             if(is_active) color = active;
             else color = normal;
