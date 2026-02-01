@@ -8,36 +8,29 @@ typedef enum {
 } FlexDirection;
 
 typedef enum {
-    BOX_SIZING_FIT_TO_CONTENT = 0,
+    BOX_SIZING_FIT = 0,
     BOX_SIZING_FIXED,
+    BOX_SIZING_GROW,
 } BoxSizing;
 
 typedef struct { int x, y, w, h; } Rect;
 typedef struct { int l, t, r, b; } Bound;
 
-typedef enum {
-    VALUE_PIXELS = 0,
-    VALUE_PERCENT,
-} ValueKind;
-
 typedef struct {
-    ValueKind kind;
-    float value;
-} ConfigValue;
-
-typedef struct { ConfigValue width, height; } ConfigSize;
-typedef struct { ConfigValue l,t,r,b; } ConfigBound;
+    void *font;
+    int font_size;
+    Color color;
+} TextConfig;
 
 typedef struct {
     FlexDirection flex_direction;
     BoxSizing sizing;
+    int fixed_width;
+    int fixed_height;
     Bound padding;
     Bound margin;
-    Color color;
-    struct {
-        void *font;
-        int font_size;
-    } text;
+    Color background_color;
+    TextConfig text;
 } BoxConfig;
 
 typedef struct Box Box;
@@ -48,6 +41,12 @@ typedef struct {
     Rect content_box;
     uint32_t cursor_x;
     uint32_t cursor_y;
+
+    uint32_t count_grow_box_children;
+    int fillable_width;
+    int fillable_height;
+    int filled_width;
+    int filled_height;
 } BoxLayout;
 
 struct Box {
@@ -154,9 +153,9 @@ void begin_frame(Ctx *ctx, uint32_t root_width, uint32_t root_height)
     ctx->count_boxes = 0;
     Box *root = &ctx->root;
     _reset_box(root);
-    root->layout.content_box = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
-    root->layout.padding_box = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
-    root->layout.margin_box  = (Rect){ .x = 0, .y = 0, .w = root_width, .h = root_height };
+    root->config.sizing = BOX_SIZING_FIXED;
+    root->config.fixed_width  = root_width;
+    root->config.fixed_height = root_height;
     root->layout.sizing = BOX_SIZING_FIXED;
     root->id = 0;
     ctx->curr = root;
@@ -184,8 +183,15 @@ void close_box(Ctx *ctx)
     ctx->curr = ctx->curr->parent;
 }
 
-void text_box(Ctx *ctx, const char *text, BoxConfig config)
+void text_box(Ctx *ctx, const char *text, TextConfig text_config)
 {
+    BoxConfig config = {0};
+    config.text = text_config;
+    config.sizing = BOX_SIZING_FIXED;
+    int height = config.text.font_size;
+    int width  = measure_text(ctx, config.text.font, text, height);
+    config.fixed_width  = width;
+    config.fixed_height = height;
     open_box(ctx, config);
     ctx->curr->text = text;
     close_box(ctx);
@@ -222,43 +228,83 @@ static void dumb_box(Box *box, const char *label)
 #define MY_MIN(A, B) ((A) < (B) ? (A) : (B))
 #define MY_MAX(A, B) ((A) > (B) ? (A) : (B))
 
-static void _compute_size(Ctx *ctx, Box *parent, Box *box)
+static void _compute_fit_sizing(Ctx *ctx, Box *parent, Box *box)
 {
-    (void)parent;
-
-    if(box->text) { // text box is a special box
-        int height = box->config.text.font_size;
-        int width  = measure_text(ctx, box->config.text.font, box->text, height);
-        box->layout.content_box.w = width;
-        box->layout.content_box.h = height;
-        box->layout.padding_box.w = width;
-        box->layout.padding_box.h = height;
-        box->layout.margin_box.w = width;
-        box->layout.margin_box.h = height;
-        box->layout.sizing  = BOX_SIZING_FIXED;
-        return;
-    } 
-
-    // TODO: It would be cool if we separate x and y sizing
-    box->layout.sizing  = box->config.sizing;
     int content_width  = 0;
     int content_height = 0;
+
     for(Box *child = box->children.begin; child != NULL; child = child->next) {
-        _compute_size(ctx, box, child);
+        _compute_fit_sizing(ctx, box, child);
+        int child_margin_box_width = child->layout.content_box.w + child->config.padding.l + child->config.padding.r +
+            child->config.margin.l + child->config.margin.r;
+        int child_margin_box_height= child->layout.content_box.h + child->config.padding.t + child->config.padding.b +
+            child->config.margin.t + child->config.margin.b;
+
         if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
-            content_width  += child->layout.margin_box.w;
-            content_height = MY_MAX(content_height, child->layout.margin_box.h);
+            content_width  += child_margin_box_width;
+            content_height = MY_MAX(content_height, child_margin_box_height);
         } else {
-            content_width   = MY_MAX(content_width, child->layout.margin_box.w);
-            content_height += child->layout.margin_box.h;
+            content_width   = MY_MAX(content_width, child_margin_box_width);
+            content_height += child_margin_box_height;
+        }
+
+        if(child->config.sizing == BOX_SIZING_GROW) {
+            box->layout.count_grow_box_children += 1;
         }
     }
-    box->layout.content_box.w = content_width;
-    box->layout.content_box.h = content_height;
-    box->layout.padding_box.w = content_width  + box->config.padding.l + box->config.padding.r;
-    box->layout.padding_box.h = content_height + box->config.padding.t + box->config.padding.b;
-    box->layout.margin_box.w = box->layout.padding_box.w + box->config.margin.l + box->config.margin.r;
-    box->layout.margin_box.h = box->layout.padding_box.h + box->config.margin.t + box->config.margin.b;
+
+    if(box->config.sizing == BOX_SIZING_FIXED) {
+        box->layout.content_box.w = box->config.fixed_width;
+        box->layout.content_box.h = box->config.fixed_height;
+    } else {
+        box->layout.content_box.w = content_width;
+        box->layout.content_box.h = content_height;
+    }
+    box->layout.filled_width  = content_width;
+    box->layout.filled_height = content_height;
+}
+
+static void _compute_grow_sizing(Ctx *ctx, Box *parent, Box *box)
+{
+    switch(box->config.sizing) {
+    case BOX_SIZING_FIXED:
+    case BOX_SIZING_FIT:
+        {
+            box->layout.padding_box.w = box->layout.content_box.w + box->config.padding.l + box->config.padding.r;
+            box->layout.padding_box.h = box->layout.content_box.h + box->config.padding.t + box->config.padding.b;
+            box->layout.margin_box.w = box->layout.padding_box.w + box->config.margin.l + box->config.margin.r;
+            box->layout.margin_box.h = box->layout.padding_box.h + box->config.margin.t + box->config.margin.b;
+        } break;
+    case BOX_SIZING_GROW:
+        {
+            /*printf("%*s #%d $%d_gb_child=%d\n", box->level*4, "", */
+            /*        box->id, parent->id, parent->layout.count_grow_box_children);*/
+            if(parent && parent->layout.count_grow_box_children) {
+                float ratio = (float)1/parent->layout.count_grow_box_children;
+                if(parent->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+                    box->layout.fillable_width  = parent->layout.fillable_width  * ratio;
+                    box->layout.fillable_height = parent->layout.fillable_height;
+                } else {
+                    box->layout.fillable_width  = parent->layout.fillable_width;
+                    box->layout.fillable_height = parent->layout.fillable_height * ratio;
+                }
+                /*printf("%*s $%d width: %d height: %d\n", box->level*4, "",*/
+                /*        parent->id, parent->layout.fillable_width, parent->layout.fillable_height);*/
+                /*printf("%*s #%d width: %d height: %d\n", box->level*4, "",*/
+                /*        box->id, box->layout.fillable_width, box->layout.fillable_height);*/
+            }
+
+            box->layout.content_box.w += box->layout.fillable_width;
+            box->layout.content_box.h += box->layout.fillable_height;
+            box->layout.padding_box.w = box->layout.content_box.w + box->config.padding.l + box->config.padding.r;
+            box->layout.padding_box.h = box->layout.content_box.h + box->config.padding.t + box->config.padding.b;
+            box->layout.margin_box.w = box->layout.padding_box.w + box->config.margin.l + box->config.margin.r;
+            box->layout.margin_box.h = box->layout.padding_box.h + box->config.margin.t + box->config.margin.b;
+        } break;
+    }
+    for(Box *child = box->children.begin; child != NULL; child = child->next) {
+        _compute_grow_sizing(ctx, box, child);
+    }
 }
 
 static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
@@ -283,7 +329,7 @@ static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
     box->layout.content_box.x = box->layout.cursor_x;
     box->layout.content_box.y = box->layout.cursor_y;
 
-    if(box->layout.sizing == BOX_SIZING_FIXED) {
+    if(box->config.sizing == BOX_SIZING_FIXED) {
         box->layout.cursor_x += box->layout.content_box.w;
         box->layout.cursor_y += box->layout.content_box.h;
     } else {
@@ -291,44 +337,46 @@ static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
             _compute_pos(ctx, box, child);
         }
     }
-    // apply right-bottom padding
-    box->layout.cursor_x += box->config.padding.r;
-    box->layout.cursor_y += box->config.padding.b;
-    // apply right-bottom margin
-    box->layout.cursor_x += box->config.margin.r;
-    box->layout.cursor_y += box->config.margin.b;
 
-    parent->layout.cursor_x = box->layout.cursor_x;
-    parent->layout.cursor_y = box->layout.cursor_y;
+    parent->layout.cursor_x += box->layout.margin_box.w;
+    parent->layout.cursor_y += box->layout.margin_box.h;
 }
 
-static int v = 0;
 static void _render(Ctx *ctx, Box *parent, Box *box)
 {
+    static int v = 0;
     if(v < ctx->count_boxes) {
-        dumb_box(box, "_render");
+        dumb_box(box, __FUNCTION__);
         v++;
     }
-    (void)parent;
     if(box->text) {
         draw_text(ctx, box->config.text.font, box->text, box->config.text.font_size, 
-                box->layout.content_box.x, box->layout.content_box.y, box->config.color);
+                box->layout.content_box.x, box->layout.content_box.y, box->config.text.color);
     } else {
-        draw_rect(ctx, box->layout.padding_box, box->config.color, 0);
+        draw_rect(ctx, box->layout.padding_box, box->config.background_color, 0);
         for(Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
-        draw_rect_outline(ctx, box->layout.padding_box, RED, 2);
+        if(parent) {
+            draw_rect_outline(ctx, box->layout.padding_box, RED,   1);
+            draw_rect_outline(ctx, box->layout.content_box, GREEN, 1);
+        }
     }
 }
 
 void end_frame(Ctx *ctx)
 {
+    Box *root = &ctx->root;
+    _compute_fit_sizing(ctx, NULL, root);
+
+    root->layout.fillable_width  = root->layout.content_box.w - root->layout.filled_width;
+    if(root->layout.fillable_width < 0) root->layout.fillable_width = 0;
+    root->layout.fillable_height = root->layout.content_box.h - root->layout.filled_height;
+    if(root->layout.fillable_height < 0) root->layout.fillable_height = 0;
+
+    _compute_grow_sizing(ctx, NULL, root);
     for(Box *child = ctx->root.children.begin; child != NULL; child = child->next)
-        _compute_size(ctx, &ctx->root, child);
-    for(Box *child = ctx->root.children.begin; child != NULL; child = child->next)
-        _compute_pos(ctx, &ctx->root, child);
-    for(Box *child = ctx->root.children.begin; child != NULL; child = child->next)
-        _render(ctx, &ctx->root, child);
+        _compute_pos(ctx, root, child);
+    _render(ctx, NULL, root);
 }
 
 // main
@@ -406,11 +454,10 @@ int main(void)
     Font font = LoadFont("./assets/fonts/JetBrainsMono/ttf/JetBrainsMono-Regular.ttf");
     SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
 
-    Bound margin  = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
-    Bound padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 };
-    BoxConfig text_config = {0};
-    text_config.text.font_size = 24;
-    text_config.text.font = &font;
+    TextConfig  text_config = {0};
+    text_config.font_size = 24;
+    text_config.font = &font;
+    text_config.color = BLACK;
 
     TempAtor ator = {0};
     char buf[1024];
@@ -428,15 +475,28 @@ int main(void)
         begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
         Box *top = open_box(ctx, (BoxConfig){ 
             .flex_direction = FLEX_LEFT_TO_RIGHT, 
-            .margin = margin, 
-            .color = color, 
-            .padding = padding 
+            .sizing = BOX_SIZING_GROW,
+            .background_color = color,
+            .margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
+            .padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
         });
             open_box(ctx, (BoxConfig){ 
-                    .flex_direction = FLEX_TOP_TO_BOTTOM, 
-                    .margin = margin, 
-                    .padding = padding, 
-                    .color = normal, 
+                    .sizing = BOX_SIZING_GROW,
+                    .flex_direction = FLEX_TOP_TO_BOTTOM,
+                    .margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
+                    .padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
+                    .background_color = normal, 
+            });
+                text_box(ctx, "Hello Short", text_config);
+                text_box(ctx, "Hello a long message 1", text_config);
+                text_box(ctx, "Hello a long message 2", text_config);
+            close_box(ctx);
+            open_box(ctx, (BoxConfig){ 
+                    .sizing = BOX_SIZING_GROW,
+                    .flex_direction = FLEX_TOP_TO_BOTTOM,
+                    .margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
+                    .padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
+                    .background_color = normal, 
             });
                 text_box(ctx, "Hello Short", text_config);
                 text_box(ctx, "Hello a long message 1", text_config);
@@ -466,28 +526,3 @@ int main(void)
     return 0;
 }
 
-/*
-# TODO:
-0. Implement image
-1. Implement different sizing strategy for each axis. For example the width of 
-   a box width would be BOX_SIZING_FIXED  but the height would be BOX_SIZING_FIT_TO_CONTENT.
-   This will require _compute_pos and _compute_size to handle each axis separately
-2. Implement border and shadow for left, right, top and bottom separately
-3. Implement this:
-```
-typedef enum {
-    VALUE_PX = 0,
-    VALUE_PERCENT
-} ValueKind;
-typedef struct {
-    ValueKind kind;
-    float value; // -inf..inf for VALUE_PX but 0..1 for VALUE_PERCENT
-} Value;
-typedef struct {
-    Value width, height;
-} ConfigSize;
-typedef struct {
-    Value l, t, r, b;
-} ConfigBound; // we name this ConfigXXX because we only use these data structures in BoxConfig
-```
-*/
