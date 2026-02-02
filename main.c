@@ -59,8 +59,6 @@ typedef struct {
     uint32_t cursor_y;
 
     uint32_t count_grow_box_children;
-    int fillable_width;
-    int fillable_height;
     int filled_width;
     int filled_height;
 } BoxLayout;
@@ -293,31 +291,20 @@ static void _compute_grow_sizing(Ctx *ctx, Box *parent, Box *box)
         } break;
     case BOX_SIZING_GROW:
         {
-            /*printf("%*s #%d $%d_gb_child=%d\n", box->level*4, "", */
-            /*        box->id, parent->id, parent->layout.count_grow_box_children);*/
-            if(parent && parent->layout.count_grow_box_children) {
-                float ratio = (float)1/parent->layout.count_grow_box_children;
+            if(parent) {
+                int pgbc = parent->layout.count_grow_box_children;
+                if(pgbc == 0) pgbc = 0;
                 if(parent->config.content_dir == CONTENT_LEFT_TO_RIGHT) {
-                    box->layout.fillable_width  = parent->layout.fillable_width  * ratio;
-                    if(parent->children.count != parent->layout.count_grow_box_children)
-                        box->layout.fillable_height = parent->layout.fillable_height + parent->layout.filled_height;
-                    else
-                        box->layout.fillable_height = parent->layout.fillable_height;
+                    box->layout.content_box.w += (parent->layout.content_box.w - parent->layout.filled_width)/pgbc;
+                    box->layout.content_box.h  =  parent->layout.content_box.h;
                 } else {
-                    if(parent->children.count != parent->layout.count_grow_box_children)
-                        box->layout.fillable_width  = parent->layout.fillable_width + parent->layout.fillable_width;
-                    else
-                        box->layout.fillable_width  = parent->layout.fillable_width;
-                    box->layout.fillable_height = parent->layout.fillable_height * ratio;
+                    box->layout.content_box.h += (parent->layout.content_box.h - parent->layout.filled_height)/pgbc;
+                    box->layout.content_box.w  = parent->layout.content_box.w;
                 }
-                /*printf("%*s $%d width: %d height: %d\n", box->level*4, "",*/
-                /*        parent->id, parent->layout.fillable_width, parent->layout.fillable_height);*/
-                /*printf("%*s #%d width: %d height: %d\n", box->level*4, "",*/
-                /*        box->id, box->layout.fillable_width, box->layout.fillable_height);*/
             }
 
-            box->layout.content_box.w += box->layout.fillable_width;
-            box->layout.content_box.h += box->layout.fillable_height;
+            // TODO: This will make the width of the paddding_box & margin_box bigger than the parent's content_box
+            //       we need to handle padding and margin using the free space not like this
             box->layout.padding_box.w = box->layout.content_box.w + box->config.padding.l + box->config.padding.r;
             box->layout.padding_box.h = box->layout.content_box.h + box->config.padding.t + box->config.padding.b;
             box->layout.margin_box.w = box->layout.padding_box.w + box->config.margin.l + box->config.margin.r;
@@ -386,12 +373,6 @@ void end_frame(Ctx *ctx)
 {
     Box *root = &ctx->root;
     _compute_fit_sizing(ctx, NULL, root);
-
-    root->layout.fillable_width  = root->layout.content_box.w - root->layout.filled_width;
-    if(root->layout.fillable_width < 0) root->layout.fillable_width = 0;
-    root->layout.fillable_height = root->layout.content_box.h - root->layout.filled_height;
-    if(root->layout.fillable_height < 0) root->layout.fillable_height = 0;
-
     _compute_grow_sizing(ctx, NULL, root);
     for(Box *child = ctx->root.children.begin; child != NULL; child = child->next)
         _compute_pos(ctx, root, child);
@@ -499,7 +480,8 @@ void draw(Ctx *ctx)
         .sizing = BOX_SIZING_GROW,
         .background_color = normal_background_color,
     });
-        open_box(ctx, (BoxConfig) { .sizing = BOX_SIZING_GROW });
+        open_box(ctx, (BoxConfig) { .padding = (Bound){.l=5,.t=5,.r=5,.b=5}, .sizing = BOX_SIZING_GROW });
+            text_box(ctx, "TEST", (TextConfig){ .color = text_color, .font = &font, .font_size = 16 });
         close_box(ctx);
         open_box(ctx, (BoxConfig) {
             .content_dir = CONTENT_TOP_TO_BOTTOM,
@@ -512,7 +494,8 @@ void draw(Ctx *ctx)
                 text_box(ctx, "Hello, B", (TextConfig){ .color = normal_text_color, .font = &font, .font_size = 16 });
             close_box(ctx);
         close_box(ctx);
-        open_box(ctx, (BoxConfig) { .sizing = BOX_SIZING_GROW });
+        open_box(ctx, (BoxConfig) { .padding = (Bound){.l=5,.t=5,.r=5,.b=5}, .sizing = BOX_SIZING_GROW });
+            text_box(ctx, "TEST", (TextConfig){ .color = text_color, .font = &font, .font_size = 16 });
         close_box(ctx);
     close_box(ctx);
     end_frame(ctx);
