@@ -3,9 +3,14 @@
 #include <assert.h>
 
 typedef enum {
-    FLEX_TOP_TO_BOTTOM = 0,
-    FLEX_LEFT_TO_RIGHT,
-} FlexDirection;
+    OVERFLOW_SCROLL = 0,
+    OVERFLOW_HIDDEN,
+} OverflowMode;
+
+typedef enum {
+    CONTENT_TOP_TO_BOTTOM = 0,
+    CONTENT_LEFT_TO_RIGHT,
+} ContentDirection;
 
 typedef enum {
     BOX_SIZING_FIT = 0,
@@ -23,7 +28,18 @@ typedef struct {
 } TextConfig;
 
 typedef struct {
-    FlexDirection flex_direction;
+    // TODO
+    struct {
+        BoxSizing x_axis;
+        BoxSizing y_axis;
+    } sizing2;
+    struct {
+        OverflowMode x_axis;
+        OverflowMode y_axis;
+    } overflow;
+    // END of TODO
+
+    ContentDirection content_dir;
     BoxSizing sizing;
     int fixed_width;
     int fixed_height;
@@ -240,7 +256,7 @@ static void _compute_fit_sizing(Ctx *ctx, Box *parent, Box *box)
         int child_margin_box_height= child->layout.content_box.h + child->config.padding.t + child->config.padding.b +
             child->config.margin.t + child->config.margin.b;
 
-        if(box->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+        if(box->config.content_dir == CONTENT_LEFT_TO_RIGHT) {
             content_width  += child_margin_box_width;
             content_height = MY_MAX(content_height, child_margin_box_height);
         } else {
@@ -281,11 +297,17 @@ static void _compute_grow_sizing(Ctx *ctx, Box *parent, Box *box)
             /*        box->id, parent->id, parent->layout.count_grow_box_children);*/
             if(parent && parent->layout.count_grow_box_children) {
                 float ratio = (float)1/parent->layout.count_grow_box_children;
-                if(parent->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+                if(parent->config.content_dir == CONTENT_LEFT_TO_RIGHT) {
                     box->layout.fillable_width  = parent->layout.fillable_width  * ratio;
-                    box->layout.fillable_height = parent->layout.fillable_height;
+                    if(parent->children.count != parent->layout.count_grow_box_children)
+                        box->layout.fillable_height = parent->layout.fillable_height + parent->layout.filled_height;
+                    else
+                        box->layout.fillable_height = parent->layout.fillable_height;
                 } else {
-                    box->layout.fillable_width  = parent->layout.fillable_width;
+                    if(parent->children.count != parent->layout.count_grow_box_children)
+                        box->layout.fillable_width  = parent->layout.fillable_width + parent->layout.fillable_width;
+                    else
+                        box->layout.fillable_width  = parent->layout.fillable_width;
                     box->layout.fillable_height = parent->layout.fillable_height * ratio;
                 }
                 /*printf("%*s $%d width: %d height: %d\n", box->level*4, "",*/
@@ -309,7 +331,7 @@ static void _compute_grow_sizing(Ctx *ctx, Box *parent, Box *box)
 
 static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
 {
-    if(parent->config.flex_direction == FLEX_LEFT_TO_RIGHT) {
+    if(parent->config.content_dir == CONTENT_LEFT_TO_RIGHT) {
         box->layout.cursor_x = parent->layout.cursor_x;
         box->layout.cursor_y = parent->layout.content_box.y;
     } else {
@@ -345,7 +367,7 @@ static void _compute_pos(Ctx *ctx, Box *parent, Box *box)
 static void _render(Ctx *ctx, Box *parent, Box *box)
 {
     static int v = 0;
-    if(v < ctx->count_boxes) {
+    if(v < ctx->count_boxes + 1) {
         dumb_box(box, __FUNCTION__);
         v++;
     }
@@ -356,10 +378,7 @@ static void _render(Ctx *ctx, Box *parent, Box *box)
         draw_rect(ctx, box->layout.padding_box, box->config.background_color, 0);
         for(Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
-        if(parent) {
-            draw_rect_outline(ctx, box->layout.padding_box, RED,   1);
-            draw_rect_outline(ctx, box->layout.content_box, GREEN, 1);
-        }
+        draw_rect_outline(ctx, box->layout.padding_box, RED, 1);
     }
 }
 
@@ -391,7 +410,7 @@ int raylib_measure_text(void *font_ptr, const char *text, int font_size)
 void raylib_draw_text(void *font_ptr, const char *text, int font_size, int x, int y, Color tint)
 {
     Font font = *(Font*)font_ptr;
-    DrawTextEx(font, text, (Vector2){ x, y }, font_size, 1, WHITE);
+    DrawTextEx(font, text, (Vector2){ x, y }, font_size, 1, tint);
 }
 
 void raylib_draw_rect(Rect r, Color color, float roundness)
@@ -438,6 +457,80 @@ char *temp_sprintf(TempAtor *ator, const char *fmt, ...)
     return dst;
 }
 
+TempAtor ator = {0};
+char buf[1024];
+Color normal_background_color;
+Color hover_background_color;
+Color active_background_color;
+Color background_color;
+Color normal_text_color;
+Color hover_text_color;
+Color active_text_color;
+Color text_color;
+bool  is_active;
+Font font;
+
+void init(Ctx *ctx)
+{
+    (void)ctx;
+    /*Font font = GetFontDefault();*/
+    font = LoadFont("./assets/fonts/JetBrainsMono/ttf/JetBrainsMono-Regular.ttf");
+    SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
+
+    ator.items = buf;
+    ator.size  = sizeof(buf);
+
+    normal_background_color = GetColor(0xF3F2F1FF);
+    hover_background_color  = GetColor(0x106EBEFF);
+    active_background_color = GetColor(0x005A9EFF);
+    normal_text_color = BLACK;
+    hover_text_color  = WHITE;
+    active_text_color = WHITE;
+    is_active = false;
+    text_color = normal_text_color;
+    background_color = normal_background_color;
+}
+
+void draw(Ctx *ctx)
+{
+    begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
+    Box *top = open_box(ctx, (BoxConfig){ 
+        .content_dir = CONTENT_LEFT_TO_RIGHT, 
+        .sizing = BOX_SIZING_GROW,
+        .background_color = normal_background_color,
+    });
+        open_box(ctx, (BoxConfig) { .sizing = BOX_SIZING_GROW });
+        close_box(ctx);
+        open_box(ctx, (BoxConfig) {
+            .content_dir = CONTENT_TOP_TO_BOTTOM,
+            .padding = (Bound){ .l = 200, .t = 10, .r = 200, .b = 10 },
+        });
+            Box *box = open_box(ctx, (BoxConfig){ .margin = (Bound){ .b = 10 }, .background_color = background_color, });
+                text_box(ctx, "Hello, A", (TextConfig){ .color = text_color, .font = &font, .font_size = 16 });
+            close_box(ctx);
+            open_box(ctx, (BoxConfig){ .margin = (Bound){ .b = 10 } });
+                text_box(ctx, "Hello, B", (TextConfig){ .color = normal_text_color, .font = &font, .font_size = 16 });
+            close_box(ctx);
+        close_box(ctx);
+        open_box(ctx, (BoxConfig) { .sizing = BOX_SIZING_GROW });
+        close_box(ctx);
+    close_box(ctx);
+    end_frame(ctx);
+    Vector2 v = GetMousePosition();
+    Box *hit;
+    hit = _hit_test(box, v.x, v.y);
+    if(hit) {
+        if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            is_active = !is_active;
+        }
+        background_color = is_active ? active_background_color : hover_background_color;
+        text_color = is_active ? active_text_color : hover_text_color;
+    } else {
+        background_color = is_active ? active_background_color : normal_background_color;
+        text_color = is_active ? active_text_color : normal_text_color;
+    }
+}
+
 int main(void)
 {
     Ctx _ctx = {0};
@@ -447,76 +540,17 @@ int main(void)
     ctx->config.draw_rect    = raylib_draw_rect;
     ctx->config.draw_rect_outline = raylib_draw_rect_outline;
 
-    /*SetConfigFlags(FLAG_WINDOW_RESIZABLE);*/
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(800, 600, "Simple UI");
 
-    /*Font font = GetFontDefault();*/
-    Font font = LoadFont("./assets/fonts/JetBrainsMono/ttf/JetBrainsMono-Regular.ttf");
-    SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
-
-    TextConfig  text_config = {0};
-    text_config.font_size = 24;
-    text_config.font = &font;
-    text_config.color = BLACK;
-
-    TempAtor ator = {0};
-    char buf[1024];
-    ator.items = buf;
-    ator.size  = sizeof(buf);
-
-    Color normal = GetColor(0x181818FF);
-    Color hover  = GetColor(0xABABABFF);
-    Color active = GetColor(0xBA1818FF);
-    bool  is_active = false;
-    Color color  = normal;
+    init(ctx);
 
     while(!WindowShouldClose()) {
         BeginDrawing();
-        begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
-        Box *top = open_box(ctx, (BoxConfig){ 
-            .flex_direction = FLEX_LEFT_TO_RIGHT, 
-            .sizing = BOX_SIZING_GROW,
-            .background_color = color,
-            .margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
-            .padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
-        });
-            open_box(ctx, (BoxConfig){ 
-                    .sizing = BOX_SIZING_GROW,
-                    .flex_direction = FLEX_TOP_TO_BOTTOM,
-                    .margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
-                    .padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
-                    .background_color = normal, 
-            });
-                text_box(ctx, "Hello Short", text_config);
-                text_box(ctx, "Hello a long message 1", text_config);
-                text_box(ctx, "Hello a long message 2", text_config);
-            close_box(ctx);
-            open_box(ctx, (BoxConfig){ 
-                    .sizing = BOX_SIZING_GROW,
-                    .flex_direction = FLEX_TOP_TO_BOTTOM,
-                    .margin = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
-                    .padding = (Bound){ .l = 10, .t = 10, .r = 10, .b = 10 }, 
-                    .background_color = normal, 
-            });
-                text_box(ctx, "Hello Short", text_config);
-                text_box(ctx, "Hello a long message 1", text_config);
-                text_box(ctx, "Hello a long message 2", text_config);
-            close_box(ctx);
-            text_box(ctx, "Hello Right Part", text_config);
-        close_box(ctx);
-        end_frame(ctx);
-        Vector2 v = GetMousePosition();
-        Box *box  = _hit_test(top, v.x, v.y);
-        if(box) {
-            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                is_active = !is_active;
-            }
-            color = is_active ? active : hover;
-        } else {
-            if(is_active) color = active;
-            else color = normal;
-        }
+        ClearBackground(BLACK);
         ator.allocated = 0;
+
+        draw(ctx);
 
         EndDrawing();
     }
@@ -525,4 +559,3 @@ int main(void)
 
     return 0;
 }
-
