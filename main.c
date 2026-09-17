@@ -109,7 +109,7 @@ void init(yui_Ctx *ctx)
 void draw(yui_Ctx *ctx)
 {
     yui_begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
-    yui_Box *top = yui_open_box(ctx, (yui_BoxConfig){ 
+    yui_open_box(ctx, (yui_BoxConfig){ 
         .content_dir = YUI_CONTENT_LEFT_TO_RIGHT, 
         .sizing = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW },
         .background_color = normal_background_color,
@@ -118,7 +118,7 @@ void draw(yui_Ctx *ctx)
             .padding = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
             .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW } 
         });
-            yui_text_box(ctx, "TEST", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
+            yui_text_box(ctx, "LEFT", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
         yui_close_box(ctx);
         yui_open_box(ctx, (yui_BoxConfig) {
             .content_dir = YUI_CONTENT_TOP_TO_BOTTOM,
@@ -136,10 +136,11 @@ void draw(yui_Ctx *ctx)
         yui_open_box(ctx, (yui_BoxConfig) { 
                 .padding = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
                 .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW } });
-            yui_text_box(ctx, "TEST", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
+            yui_text_box(ctx, "RIGHT", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
         yui_close_box(ctx);
     yui_close_box(ctx);
     yui_end_frame(ctx);
+
     Vector2 v = GetMousePosition();
     yui_Box *hit;
     hit = yui_hit_test(box, v.x, v.y);
