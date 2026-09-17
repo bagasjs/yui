@@ -255,8 +255,6 @@ internal void _compute_grow_sizing_on(yui_Ctx *ctx, yui_Box *parent, yui_Box *bo
             }
 
 
-            // TODO: This will make the width of the paddding_box & margin_box bigger than the parent's content_box
-            //       we need to handle padding and margin using the free space not like this
             if(x_axis) {
                 box->layout.padding_box.w = box->layout.margin_box.w - box->config.margin.l - box->config.margin.r;
                 box->layout.content_box.w = box->layout.padding_box.w - box->config.padding.l - box->config.padding.r;

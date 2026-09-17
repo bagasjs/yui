@@ -63,6 +63,8 @@ typedef struct {
     uint32_t count_grow_box_children;
     uint32_t count_children_with_grow_box_on_x_axis;
     uint32_t count_children_with_grow_box_on_y_axis;
+
+    /* filled width/height will only be increased by non-growbox children */
     int filled_width;
     int filled_height;
 } yui_BoxLayout;
