@@ -119,7 +119,7 @@ void yui_text_box(yui_Ctx *ctx, const char *text, yui_TextConfig text_config)
 internal void dumb_box(yui_Box *box, const char *label)
 {
     if(box->text) {
-        printf("%s: %*s [%d] \"%s\" content[x=%d y=%d w=%d h=%d] padding[x=%d y=%d w=%d h=%d] margin[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
+        printf("%s: %*s [%d] \"%s\" cnt[x=%d y=%d w=%d h=%d] pad[x=%d y=%d w=%d h=%d] mar[x=%d y=%d w=%d h=%d] cur[x=%d y=%d]\n", 
                 label, box->level*4, "", box->id, box->text, 
                 box->layout.content_box.x, box->layout.content_box.y, 
                 box->layout.content_box.w, box->layout.content_box.h,
@@ -130,7 +130,7 @@ internal void dumb_box(yui_Box *box, const char *label)
                 box->layout.cursor_x, box->layout.cursor_y
                 );
     } else {
-        printf("%s: %*s [%d] content[x=%d y=%d w=%d h=%d] padding[x=%d y=%d w=%d h=%d] margin[x=%d y=%d w=%d h=%d] cursor[x=%d y=%d]\n", 
+        printf("%s: %*s [%d] cnt[x=%d y=%d w=%d h=%d] pad[x=%d y=%d w=%d h=%d] mar[x=%d y=%d w=%d h=%d] cur[x=%d y=%d]\n", 
                 label, box->level*4, "", box->id,
                 box->layout.content_box.x, box->layout.content_box.y, 
                 box->layout.content_box.w, box->layout.content_box.h,
@@ -156,28 +156,27 @@ internal void _compute_fit_sizing_on(yui_Ctx *ctx, yui_Box *parent, yui_Box *box
     for(yui_Box *child = box->children.begin; child != NULL; child = child->next) {
         _compute_fit_sizing_on(ctx, box, child, x_axis);
         int child_margin_box_size = 0;
+
         if(x_axis) {
-            child_margin_box_size = child->layout.content_box.w + child->config.padding.l + child->config.padding.r +
-                child->config.margin.l + child->config.margin.r;
+            if(child->config.sizing.x_axis == YUI_BOX_SIZING_GROW) {
+                box->layout.count_children_with_grow_box_on_x_axis += 1;
+            } else {
+                child_margin_box_size = child->layout.content_box.w + child->config.padding.l + child->config.padding.r +
+                    child->config.margin.l + child->config.margin.r;
+            }
         } else {
-            child_margin_box_size = child->layout.content_box.h + child->config.padding.t + child->config.padding.b +
-                child->config.margin.t + child->config.margin.b;
+            if(child->config.sizing.y_axis == YUI_BOX_SIZING_GROW) {
+                box->layout.count_children_with_grow_box_on_y_axis += 1;
+            } else {
+                child_margin_box_size = child->layout.content_box.h + child->config.padding.t + child->config.padding.b +
+                    child->config.margin.t + child->config.margin.b;
+            }
         }
 
         if(box->config.content_dir == aligned_direction) {
             content_size += child_margin_box_size;
         } else {
             content_size  = MY_MAX(content_size, child_margin_box_size);
-        }
-
-        if(x_axis) {
-            if(child->config.sizing.x_axis == YUI_BOX_SIZING_GROW) {
-                box->layout.count_children_with_grow_box_on_x_axis += 1;
-            }
-        } else {
-            if(child->config.sizing.y_axis == YUI_BOX_SIZING_GROW) {
-                box->layout.count_children_with_grow_box_on_y_axis += 1;
-            }
         }
     }
 
@@ -194,6 +193,7 @@ internal void _compute_fit_sizing_on(yui_Ctx *ctx, yui_Box *parent, yui_Box *box
             box->layout.content_box.h = content_size;
         }
     }
+
     if(x_axis) {
         box->layout.filled_width  = content_size;
     } else {
@@ -221,33 +221,40 @@ internal void _compute_grow_sizing_on(yui_Ctx *ctx, yui_Box *parent, yui_Box *bo
     case YUI_BOX_SIZING_GROW:
         {
             if(parent) {
+                // pgbc = parent's grow box children count
                 int pgbc = x_axis 
                     ? parent->layout.count_children_with_grow_box_on_x_axis
                     : parent->layout.count_children_with_grow_box_on_y_axis;
                 if(pgbc == 0) pgbc = 0;
                 if(parent->config.content_dir == aligned_direction) {
                     if(x_axis) {
-                        box->layout.content_box.w += (parent->layout.content_box.w - parent->layout.filled_width)/pgbc;
+                        box->layout.margin_box.w += (parent->layout.content_box.w - parent->layout.filled_width)/pgbc;
                     } else {
-                        box->layout.content_box.h += (parent->layout.content_box.h - parent->layout.filled_height)/pgbc;
+                        box->layout.margin_box.h += (parent->layout.content_box.h - parent->layout.filled_height)/pgbc;
                     }
+                    /*if(box->id == 1) printf("[INFO] p->filled_h = %d\n", parent->layout.filled_height);*/
+                    /*if(box->id == 1) printf("[INFO] p->cbox.h = %d\n", parent->layout.content_box.h);*/
+                    /*if(box->id == 1) printf("[INFO] c->mbox.h = %d\n", box->layout.margin_box.h);*/
                 } else {
                     if(x_axis) {
-                        box->layout.content_box.w  = parent->layout.content_box.w;
+                        box->layout.margin_box.w  =  parent->layout.content_box.w;
                     } else {
-                        box->layout.content_box.h  =  parent->layout.content_box.h;
+                        box->layout.margin_box.h  =  parent->layout.content_box.h;
                     }
                 }
+            } else {
+                // TODO: default behaviour is fit sizing?
             }
+
 
             // TODO: This will make the width of the paddding_box & margin_box bigger than the parent's content_box
             //       we need to handle padding and margin using the free space not like this
             if(x_axis) {
-                box->layout.padding_box.w = box->layout.content_box.w + box->config.padding.l + box->config.padding.r;
-                box->layout.margin_box.w = box->layout.padding_box.w + box->config.margin.l + box->config.margin.r;
+                box->layout.padding_box.w = box->layout.margin_box.w - box->config.margin.l - box->config.margin.r;
+                box->layout.content_box.w = box->layout.padding_box.w - box->config.padding.l - box->config.padding.r;
             } else {
-                box->layout.padding_box.h = box->layout.content_box.h + box->config.padding.t + box->config.padding.b;
-                box->layout.margin_box.h = box->layout.padding_box.h + box->config.margin.t + box->config.margin.b;
+                box->layout.padding_box.h = box->layout.margin_box.h - box->config.margin.t - box->config.margin.b;
+                box->layout.content_box.h = box->layout.padding_box.h - box->config.padding.t - box->config.padding.b;
             }
         } break;
     }
@@ -311,10 +318,12 @@ internal void _render(yui_Ctx *ctx, yui_Box *parent, yui_Box *box)
         v++;
     }
     if(box->text) {
+        /*draw_rect_outline(ctx, box->layout.content_box, (yui_Color){ 0xFF, 0, 0, 0xFF }, 1);*/
         draw_text(ctx, box->config.text.font, box->text, box->config.text.font_size, 
                 box->layout.content_box.x, box->layout.content_box.y, box->config.text.color);
     } else {
         draw_rect(ctx, box->layout.padding_box, box->config.background_color, 0);
+        draw_rect_outline(ctx, box->layout.content_box, (yui_Color){ 0xFF, 0, 0, 0xFF }, 1);
         for(yui_Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
     }
