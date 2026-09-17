@@ -1,7 +1,15 @@
 #include "yui.h"
 #include <assert.h>
+#include <string.h>
 
 #define internal static
+
+void yui_init(yui_Ctx *ctx, yui_Backend backend)
+{
+    if(!ctx) return;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->config = backend;
+}
 
 internal int measure_text(yui_Ctx *ctx, void *font, const char *text, int font_size)
 {

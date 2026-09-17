@@ -158,14 +158,17 @@ void draw(yui_Ctx *ctx)
 
 int main(void)
 {
+    yui_Backend backend = {0};
+    backend.measure_text = raylib_measure_text;
+    backend.draw_text    = raylib_draw_text;
+    backend.draw_rect    = raylib_draw_rect;
+    backend.draw_rect_outline = raylib_draw_rect_outline;
+    backend.begin_scissor_mode = raylib_begin_scissor_mode;
+    backend.end_scissor_mode = raylib_end_scissor_mode;
+
     yui_Ctx _ctx = {0};
     yui_Ctx *ctx = &_ctx;
-    ctx->config.measure_text = raylib_measure_text;
-    ctx->config.draw_text    = raylib_draw_text;
-    ctx->config.draw_rect    = raylib_draw_rect;
-    ctx->config.draw_rect_outline = raylib_draw_rect_outline;
-    ctx->config.begin_scissor_mode = raylib_begin_scissor_mode;
-    ctx->config.end_scissor_mode = raylib_end_scissor_mode;
+    yui_init(ctx, backend);
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(800, 600, "Simple UI");

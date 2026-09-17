@@ -91,6 +91,15 @@ typedef void (*yui_DrawRectOutlinePfn)(yui_Rect rect, yui_Color color, int borde
 typedef void (*yui_BeginScissorModePfn)(yui_Rect rect);
 typedef void (*yui_EndScissorModePfn)(void);
 
+typedef struct yui_Backend {
+    yui_MeasureTextPfn measure_text;
+    yui_DrawTextPfn draw_text;
+    yui_DrawRectPfn draw_rect;
+    yui_DrawRectOutlinePfn draw_rect_outline;
+    yui_BeginScissorModePfn begin_scissor_mode;
+    yui_EndScissorModePfn end_scissor_mode;
+} yui_Backend;
+
 #define YUI_BOXES_CAP 1024
 typedef struct {
     yui_Box  root;
@@ -99,15 +108,10 @@ typedef struct {
     yui_Box boxes[YUI_BOXES_CAP];
     uint32_t count_boxes;
 
-    struct {
-        yui_MeasureTextPfn measure_text;
-        yui_DrawTextPfn draw_text;
-        yui_DrawRectPfn draw_rect;
-        yui_DrawRectOutlinePfn draw_rect_outline;
-        yui_BeginScissorModePfn begin_scissor_mode;
-        yui_EndScissorModePfn end_scissor_mode;
-    } config;
+    yui_Backend config;
 } yui_Ctx;
+
+void yui_init(yui_Ctx *ctx, yui_Backend backend);
 
 void yui_begin_frame(yui_Ctx *ctx, uint32_t w, uint32_t h);
 void yui_end_frame(yui_Ctx *ctx);
