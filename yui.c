@@ -118,6 +118,7 @@ void yui_text_box(yui_Ctx *ctx, const char *text, yui_TextConfig text_config)
     int width  = measure_text(ctx, config.text.font, text, height);
     config.fixed_width  = width;
     config.fixed_height = height;
+    config.padding.l = config.padding.t = config.padding.b = config.padding.r = 5;
     yui_open_box(ctx, config);
     ctx->curr->text = text;
     yui_close_box(ctx);
