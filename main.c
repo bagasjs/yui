@@ -115,7 +115,7 @@ void draw(yui_Ctx *ctx)
         .background_color = normal_background_color,
     });
         yui_open_box(ctx, (yui_BoxConfig) { 
-            .padding = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
+            .margin  = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
             .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW } 
         });
             yui_text_box(ctx, "LEFT", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
@@ -123,8 +123,11 @@ void draw(yui_Ctx *ctx)
         yui_open_box(ctx, (yui_BoxConfig) {
             .content_dir = YUI_CONTENT_TOP_TO_BOTTOM,
             .padding = (yui_Bound){ .l = 200, .t = 10, .r = 200, .b = 10 },
+            .margin  = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
+            .background_color = (yui_Color){ 0xFF, 0x18, 0x18, 0xFF },
         });
-            yui_Box *box = yui_open_box(ctx, (yui_BoxConfig){ 
+            yui_text_box(ctx, "MIDDLE", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
+            yui_Box *button= yui_open_box(ctx, (yui_BoxConfig){ 
                     .margin = (yui_Bound){ .b = 10 }, 
                     .background_color = background_color, });
                 yui_text_box(ctx, "Hello, A", (yui_TextConfig){ .color = text_color, .font = &font, .font_size = 18 });
@@ -134,8 +137,9 @@ void draw(yui_Ctx *ctx)
             yui_close_box(ctx);
         yui_close_box(ctx);
         yui_open_box(ctx, (yui_BoxConfig) { 
-                .padding = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
-                .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW } });
+            .margin  = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
+            .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW } 
+        });
             yui_text_box(ctx, "RIGHT", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
         yui_close_box(ctx);
     yui_close_box(ctx);
@@ -143,7 +147,7 @@ void draw(yui_Ctx *ctx)
 
     Vector2 v = GetMousePosition();
     yui_Box *hit;
-    hit = yui_hit_test(box, v.x, v.y);
+    hit = yui_hit_test(button, v.x, v.y);
     if(hit) {
         if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             is_active = !is_active;
@@ -154,6 +158,37 @@ void draw(yui_Ctx *ctx)
         background_color = is_active ? active_background_color : normal_background_color;
         text_color = is_active ? active_text_color : normal_text_color;
     }
+}
+
+void draw2(yui_Ctx *ctx)
+{
+    yui_begin_frame(ctx, GetScreenWidth(), GetScreenHeight());
+    yui_open_box(ctx, (yui_BoxConfig) { 
+        .margin  = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
+        .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW },
+        .background_color = (yui_Color){ 0xFF, 0xFF, 0xFF, 0xFF },
+    });
+        yui_text_box(ctx, "LEFT", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
+    yui_close_box(ctx);
+
+    yui_open_box(ctx, (yui_BoxConfig) {
+        .sizing = { YUI_BOX_SIZING_FIXED, YUI_BOX_SIZING_FIXED },
+        .fixed_width  = 200,
+        .fixed_height = 200,
+        .margin  = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
+        .background_color = (yui_Color){ 0xFF, 0xFF, 0xFF, 0xFF },
+    });
+        yui_text_box(ctx, "Hello, World", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
+    yui_close_box(ctx);
+
+    yui_open_box(ctx, (yui_BoxConfig) { 
+        .margin  = (yui_Bound){.l=5,.t=5,.r=5,.b=5}, 
+        .sizing  = { YUI_BOX_SIZING_GROW, YUI_BOX_SIZING_GROW },
+        .background_color = (yui_Color){ 0xFF, 0xFF, 0xFF, 0xFF },
+    });
+        yui_text_box(ctx, "RIGHT", (yui_TextConfig){ .color = normal_text_color, .font = &font, .font_size = 18 });
+    yui_close_box(ctx);
+    yui_end_frame(ctx);
 }
 
 int main(void)
@@ -180,7 +215,8 @@ int main(void)
         ClearBackground(BLACK);
         ator.allocated = 0;
 
-        draw(ctx);
+        /*draw(ctx);*/
+        draw2(ctx);
 
         EndDrawing();
     }

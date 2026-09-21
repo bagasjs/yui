@@ -31,7 +31,7 @@ internal void draw_rect(yui_Ctx *ctx, yui_Rect rect, yui_Color color, float roun
 
 internal void draw_rect_outline(yui_Ctx *ctx, yui_Rect rect, yui_Color color, int thickness)
 {
-    if(ctx->config.draw_rect)
+    if(ctx->config.draw_rect_outline)
         ctx->config.draw_rect_outline(rect, color, thickness);
 }
 
@@ -46,16 +46,6 @@ internal inline void _add_box_child(yui_Box *parent, yui_Box *child)
     }
     parent->children.count += 1;
     child->parent = parent;
-}
-
-internal inline void _reset_box(yui_Box *box)
-{
-    box->children.begin = NULL;
-    box->children.end   = NULL;
-    box->children.count = 0;
-    box->parent = NULL;
-    box->next   = NULL;
-    box->layout = (yui_BoxLayout){0};
 }
 
 #define POINT_IN_RECT(R, X, Y) (((R).x <= (X) && (X) < (R).x + (R).w) && ((R).y <= (Y) && (Y) < (R).y + (R).h))
@@ -73,9 +63,20 @@ yui_Box *yui_hit_test(yui_Box *box, int x, int y)
     return NULL;
 }
 
+internal inline void _reset_box(yui_Box *box)
+{
+    box->children.begin = NULL;
+    box->children.end   = NULL;
+    box->children.count = 0;
+    box->parent = NULL;
+    box->next   = NULL;
+    box->layout = (yui_BoxLayout){0};
+}
+
 void yui_begin_frame(yui_Ctx *ctx, uint32_t root_width, uint32_t root_height)
 {
     ctx->count_boxes = 0;
+    ctx->level = 0;
     yui_Box *root = &ctx->root;
     _reset_box(root);
     root->config.sizing.x_axis = YUI_BOX_SIZING_FIXED;
@@ -99,13 +100,14 @@ yui_Box *yui_open_box(yui_Ctx *ctx, yui_BoxConfig config)
     curr->config = config;
     _add_box_child(prev, curr);
     ctx->curr = curr;
+    curr->text = NULL;
     return curr;
 }
 
 void yui_close_box(yui_Ctx *ctx)
 {
     ctx->level -= 1;
-    ctx->curr = ctx->curr->parent;
+    if(ctx->curr->parent) ctx->curr = ctx->curr->parent;
 }
 
 void yui_text_box(yui_Ctx *ctx, const char *text, yui_TextConfig text_config)
@@ -296,25 +298,28 @@ internal void _compute_pos_on(yui_Ctx *ctx, yui_Box *parent, yui_Box *box, bool 
         box->layout.content_box.y = box->layout.cursor_y;
     }
 
-    if(x_axis) {
-        if(box->config.sizing.x_axis == YUI_BOX_SIZING_FIXED) {
-            box->layout.cursor_x += box->layout.content_box.w;
-        } else {
-            for(yui_Box *child = box->children.begin; child != NULL; child = child->next) {
-                _compute_pos_on(ctx, box, child, x_axis);
-            }
-        }
-        parent->layout.cursor_x += box->layout.margin_box.w;
-    } else {
-        if(box->config.sizing.y_axis == YUI_BOX_SIZING_FIXED) {
-            box->layout.cursor_y += box->layout.content_box.h;
-        } else {
-            for(yui_Box *child = box->children.begin; child != NULL; child = child->next) {
-                _compute_pos_on(ctx, box, child, x_axis);
-            }
-        }
-        parent->layout.cursor_y += box->layout.margin_box.h;
+    for(yui_Box *child = box->children.begin; child != NULL; child = child->next) {
+        _compute_pos_on(ctx, box, child, x_axis);
     }
+    if(x_axis) parent->layout.cursor_x += box->layout.margin_box.w;
+    else       parent->layout.cursor_y += box->layout.margin_box.h;
+
+    /*if(x_axis) {*/
+    /*    if(box->config.sizing.x_axis == YUI_BOX_SIZING_FIXED) {*/
+    /*        box->layout.cursor_x += box->layout.content_box.w;*/
+    /*    } else {*/
+    /*    }*/
+    /*    parent->layout.cursor_x += box->layout.margin_box.w;*/
+    /*} else {*/
+    /*    if(box->config.sizing.y_axis == YUI_BOX_SIZING_FIXED) {*/
+    /*        box->layout.cursor_y += box->layout.content_box.h;*/
+    /*    } else {*/
+    /*        for(yui_Box *child = box->children.begin; child != NULL; child = child->next) {*/
+    /*            _compute_pos_on(ctx, box, child, x_axis);*/
+    /*        }*/
+    /*    }*/
+    /*    parent->layout.cursor_y += box->layout.margin_box.h;*/
+    /*}*/
 }
 
 internal void _render(yui_Ctx *ctx, yui_Box *parent, yui_Box *box)
