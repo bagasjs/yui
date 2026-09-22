@@ -90,7 +90,7 @@ void init(yui_Ctx *ctx)
 {
     (void)ctx;
     /*Font font = GetFontDefault();*/
-    font = LoadFont("./assets/fonts/JetBrainsMono/ttf/JetBrainsMono-Regular.ttf");
+    /*font = LoadFont("./assets/fonts/JetBrainsMono/ttf/JetBrainsMono-Regular.ttf");*/
     SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
 
     ator.items = buf;

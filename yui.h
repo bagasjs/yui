@@ -44,6 +44,9 @@ typedef struct {
         yui_BoxSizing y_axis;
     } sizing;
 
+    int       border_width;
+    yui_Color border_color;
+
     yui_ContentDirection content_dir;
     int fixed_width;
     int fixed_height;

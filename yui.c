@@ -330,12 +330,12 @@ internal void _render(yui_Ctx *ctx, yui_Box *parent, yui_Box *box)
         v++;
     }
     if(box->text) {
-        /*draw_rect_outline(ctx, box->layout.content_box, (yui_Color){ 0xFF, 0, 0, 0xFF }, 1);*/
         draw_text(ctx, box->config.text.font, box->text, box->config.text.font_size, 
                 box->layout.content_box.x, box->layout.content_box.y, box->config.text.color);
     } else {
+        if(box->config.border_width > 0) 
+            draw_rect_outline(ctx, box->layout.padding_box, box->config.border_color, box->config.border_width);
         draw_rect(ctx, box->layout.padding_box, box->config.background_color, 0);
-        draw_rect_outline(ctx, box->layout.content_box, (yui_Color){ 0xFF, 0, 0, 0xFF }, 1);
         for(yui_Box *child = box->children.begin; child != NULL; child = child->next)
             _render(ctx, box, child);
     }
