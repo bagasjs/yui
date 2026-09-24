@@ -18,6 +18,11 @@ typedef enum {
     YUI_BOX_SIZING_FIT = 0,
     YUI_BOX_SIZING_FIXED,
     YUI_BOX_SIZING_GROW,
+    
+    // Relative is basically something like width = 50% 
+    // This only works if the parent is either FIXED or GROW
+    // If the parent is fit, it will fallback to SIZING_FIT
+    YUI_BOX_SIZING_RELATIVE,
 } yui_BoxSizing;
 
 typedef struct { uint8_t r, g, b, a; } yui_Color;
